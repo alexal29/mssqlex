@@ -1,0 +1,95 @@
+version: '3'
+services:
+  mssql_exporter:
+    image: "danieloliver/mssql_exporter:latest"
+    ports:
+      - "80:80"
+    depends_on:
+      - sqlserver.dev
+    environment:
+      - PROMETHEUS_MSSQL_DataSource=Server=tcp:sqlserver.dev,1433;Initial Catalog=master;Persist Security Info=False;User ID=sa;Password=yourStrong(!)Password;MultipleActiveResultSets=False;Encrypt=False;TrustServerCertificate=True;Connection Timeout=10;
+      - PROMETHEUS_MSSQL_ConfigFile=metrics.json
+      - PROMETHEUS_MSSQL_ServerPath=metrics
+      - PROMETHEUS_MSSQL_ServerPort=80
+      - PROMETHEUS_MSSQL_AddExporterMetrics=false
+      - PROMETHEUS_MSSQL_Serilog__MinimumLevel=Information
+      - |
+        PROMETHEUS_MSSQL_ConfigText=
+        {
+          "Queries": [
+            {
+              "Name": "mssql_process_status",
+              "Query": "SELECT status, COUNT(*) count FROM sys.sysprocesses GROUP BY status",
+              "Description": "Counts the number of processes per status",
+              "Usage": "GaugesWithLabels",
+              "Columns": [
+                {
+                  "Name": "status",
+                  "Label": "status",
+                  "Usage": "GaugeLabel",
+                  "Order": 0
+                },
+                {
+                  "Name": "count",
+                  "Label": "count",
+                  "Usage": "Gauge"
+                }
+              ]
+            },
+            {
+              "Name": "mssql_process_connections",
+              "Query": "SELECT ISNULL(DB_NAME(dbid), 'other') as dbname, COUNT(dbid) as connections FROM sys.sysprocesses WHERE dbid > 0 GROUP BY dbid",
+              "Description": "Counts the number of connections per db",
+              "Usage": "GaugesWithLabels",
+              "Columns": [
+                {
+                  "Name": "dbname",
+                  "Label": "dbname",
+                  "Usage": "GaugeLabel",
+                  "Order": 0
+                },
+                {
+                  "Name": "connections",
+                  "Label": "count",
+                  "Usage": "Gauge"
+                }
+              ]
+            },
+            {
+              "Name": "mssql_deadlocks",
+              "Query": "SELECT cntr_value FROM sys.dm_os_performance_counters where counter_name = 'Number of Deadlocks/sec' AND instance_name = '_Total'",
+              "Description": "Number of lock requests per second that resulted in a deadlock since last restart",
+              "Columns": [
+                {
+                  "Name": "cntr_value",
+                  "Label": "mssql_deadlocks",
+                  "Usage": "Gauge",
+                  "DefaultValue": 0
+                }
+              ]
+            }
+          ],
+          "MillisecondTimeout": 4000
+        }
+  sqlserver.dev:
+    image: "mcr.microsoft.com/mssql/server:2017-latest"
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=yourStrong(!)Password
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus_mssqlex
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - 9090:9090
